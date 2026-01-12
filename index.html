@@ -1,0 +1,86 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Emids Talent Match</title>
+    
+    <!-- Favicon (Browser Tab Icon) -->
+    <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="16" width="28" height="28" fill="none" stroke="%230D0359" stroke-width="5"/><rect x="22" y="4" width="22" height="22" fill="%230FE4BD" rx="2"/></svg>'>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    
+    <!-- Babel for in-browser TSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      :root {
+        --color-indigo: #0D0359;
+        --color-teal: #0FE4BD;
+        --color-text-dark: #0D0359;
+        --color-text-light: #ffffff;
+        --color-bg-gray: #F4F5F7;
+      }
+      body {
+        margin: 0;
+        font-family: 'Barlow', sans-serif;
+        background-color: var(--color-bg-gray);
+        color: var(--color-text-dark);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: #f1f1f1; }
+      ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+      
+      #error-box {
+        display: none;
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: #ffdddd;
+        border-left: 6px solid #f44336;
+        padding: 15px;
+        z-index: 9999;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        font-family: monospace;
+        color: #d32f2f;
+        max-width: 90%;
+      }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "@google/genai": "https://esm.sh/@google/genai",
+    "xlsx": "https://esm.sh/xlsx@0.18.5",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/"
+  }
+}
+</script>
+  </head>
+  <body>
+    <div id="error-box"></div>
+    <div id="root"></div>
+    
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        const errorBox = document.getElementById('error-box');
+        errorBox.style.display = 'block';
+        errorBox.innerHTML = `<strong>Application Error</strong><br>${message}<br><small>Location: ${source}:${lineno}</small>`;
+      };
+    </script>
+
+    <!-- Load the TSX file with Babel -->
+    <script type="text/babel" data-type="module" data-presets="typescript,react" src="./index.tsx"></script>
+  </body>
+</html>
