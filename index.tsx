@@ -246,17 +246,17 @@ const HelpModal = ({ onClose }: { onClose: () => void }) => {
                 <button style={styles.modalClose} onClick={onClose}>×</button>
                 <h2 style={{ color: '#0D0359', marginTop: 0 }}>Talent Match - Documentation</h2>
                 <h3 style={{ color: '#0FE4BD' }}>1. Use Case Overview</h3>
-                <p><strong>Talent Match</strong> is an intelligent resource management tool designed to optimize the utilization of the "Launchpad" (Bench).</p>
+                <p><strong>Talent Match</strong> is an intelligent resource management tool designed to optimize the utilization of the Launchpad (Bench).</p>
                 <h3 style={{ color: '#0FE4BD' }}>2. Key Functionality</h3>
                 <ul>
                     <li><strong>Skills Search:</strong> Results only show if a skill matches (Exact or via Expansion).</li>
                     <li><strong>Scoring Hierarchy:</strong> Primary Exact > Secondary Exact > Additional Exact > Primary Expansion > Secondary Expansion > Additional Expansion.</li>
                     <li><strong>Experience Range:</strong> Filter candidates by a minimum and maximum years of experience.</li>
-                    <li><strong>Location Intelligence:</strong> Smart mapping of cities.</li>
+                    <li><strong>Location Intelligence:</strong> Smart mapping of cities to regions.</li>
                 </ul>
                 <h3 style={{ color: '#0FE4BD' }}>3. Business Rules</h3>
                 <ul>
-                    <li><strong>Exclusions:</strong> Automatically hides employees marked as "Earmarked" or "Going on ML".</li>
+                    <li><strong>Exclusions:</strong> Automatically hides employees marked as Earmarked or Going on ML.</li>
                     <li><strong>Requirement:</strong> Results are only displayed if at least one selected/searched skill matches.</li>
                 </ul>
             </div>
@@ -368,27 +368,67 @@ const App = () => {
   
   const handleAIQuery = async () => {
     const apiKey = process.env.API_KEY;
-    if (!apiKey) { alert("API Key is missing."); return; }
-    if (!aiQuery.trim()) return;
+    if (!apiKey) { 
+      alert("API Key is not configured correctly in the environment."); 
+      return; 
+    }
+    if (!aiQuery.trim()) {
+      return;
+    }
+
     setIsAiLoading(true);
     try {
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Extract filters from: "${aiQuery}". Skills: ${uniqueSkills.join(', ')}. Locations: ${uniqueLocations.join(', ')}. Return JSON: {skills, minExperience, maxExperience, location, projectStartDate}. Rules: Map cities to countries. Use null for missing.`;
+      const prompt = `Act as a specialized talent filter extractor. 
+Analyze the user query: "${aiQuery}".
+Context - Unique available skills: ${uniqueSkills.join(', ')}.
+Context - Available locations: ${uniqueLocations.join(', ')}.
+
+Return a JSON object ONLY.
+Rules:
+1. "skills" must be an array of EXACT matches from the unique skills list provided.
+2. "minExperience" and "maxExperience" must be numbers.
+3. "location" must match a location from the list or a region.
+4. Use null if a filter is not mentioned.
+
+Example:
+{
+  "skills": ["Java", "SQL"],
+  "minExperience": 5,
+  "maxExperience": 12,
+  "location": "India",
+  "projectStartDate": null
+}`;
+
       const response = await ai.models.generateContent({ 
         model: 'gemini-3-flash-preview', 
         contents: prompt, 
         config: { responseMimeType: 'application/json' } 
       });
+
       const extracted = JSON.parse(response.text || "{}");
-      const newFilters = { ...filters };
-      if (extracted.skills && Array.isArray(extracted.skills)) newFilters.skills = extracted.skills;
-      if (extracted.location) newFilters.location = extracted.location;
-      if (extracted.minExperience) newFilters.minExperience = extracted.minExperience;
-      if (extracted.maxExperience) newFilters.maxExperience = extracted.maxExperience;
-      if (extracted.projectStartDate) newFilters.projectStartDate = extracted.projectStartDate;
+      
+      const newFilters: FilterState = {
+        skills: Array.isArray(extracted.skills) ? extracted.skills : [],
+        minExperience: typeof extracted.minExperience === 'number' ? extracted.minExperience : '',
+        maxExperience: typeof extracted.maxExperience === 'number' ? extracted.maxExperience : '',
+        location: typeof extracted.location === 'string' ? extracted.location : '',
+        projectStartDate: typeof extracted.projectStartDate === 'string' ? extracted.projectStartDate : ''
+      };
+
       setFilters(newFilters);
-      handleSearch(newFilters);
-    } catch (error) { console.error("AI Error:", error); } finally { setIsAiLoading(false); }
+      if (newFilters.skills.length > 0) {
+        handleSearch(newFilters);
+      } else {
+        alert("AI could not extract specific skills. Please select them manually.");
+      }
+
+    } catch (error) { 
+      console.error("AI Error:", error);
+      alert("There was an issue processing your request with AI. Please use the filters manually.");
+    } finally { 
+      setIsAiLoading(false); 
+    }
   };
 
   const calculateScore = (emp: Employee, currentFilters: FilterState): ScoredEmployee | null => {
@@ -397,10 +437,9 @@ const App = () => {
     let availScore = 0;
     const matchedDetails: string[] = [];
     const requestedSkills = currentFilters.skills;
-    const hasSkillFilters = requestedSkills.length > 0;
     
-    // REQUIREMENT: Results should be displayed only if one of the skillset matches with the skill expansion list.
-    if (!hasSkillFilters) return null;
+    // Results should be displayed only if one of the skillset matches
+    if (requestedSkills.length === 0) return null;
 
     let totalSkillWeight = 0;
     let anySkillMatch = false;
@@ -411,7 +450,7 @@ const App = () => {
 
         let bestMatchForThisSkill = 0;
 
-        // Check Primary
+        // 1. Primary Exact (50) / Primary Expansion (25)
         emp.primarySkill.forEach(s => {
             const normS = getCanonicalSkill(s);
             if (normS === canonicalReq) { bestMatchForThisSkill = Math.max(bestMatchForThisSkill, 50); anySkillMatch = true; matchedDetails.push(`Primary Exact: ${s}`); }
@@ -420,7 +459,7 @@ const App = () => {
             }
         });
 
-        // Check Secondary
+        // 2. Secondary Exact (40) / Secondary Expansion (15)
         emp.secondarySkill.forEach(s => {
             const normS = getCanonicalSkill(s);
             if (normS === canonicalReq) { bestMatchForThisSkill = Math.max(bestMatchForThisSkill, 40); anySkillMatch = true; matchedDetails.push(`Secondary Exact: ${s}`); }
@@ -429,7 +468,7 @@ const App = () => {
             }
         });
 
-        // Check Additional
+        // 3. Additional Exact (30) / Additional Expansion (10)
         emp.additionalSkill.forEach(s => {
             const normS = getCanonicalSkill(s);
             if (normS === canonicalReq) { bestMatchForThisSkill = Math.max(bestMatchForThisSkill, 30); anySkillMatch = true; matchedDetails.push(`Additional Exact: ${s}`); }
@@ -449,9 +488,9 @@ const App = () => {
     if (currentFilters.minExperience !== '' || currentFilters.maxExperience !== '') {
         const min = currentFilters.minExperience === '' ? 0 : Number(currentFilters.minExperience);
         const max = currentFilters.maxExperience === '' ? 100 : Number(currentFilters.maxExperience);
-        if (emp.totalExperience < min || emp.totalExperience > max) return null;
+        if (emp.totalExperience < min || (max !== 100 && emp.totalExperience > max)) return null;
         expScore = 30; 
-        const target = (min + max) / 2;
+        const target = (min + (max === 100 ? min : max)) / 2;
         expDeviation = Math.abs(emp.totalExperience - target);
     } else {
         expScore = 30; 
@@ -505,6 +544,7 @@ const App = () => {
   };
 
   const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => { const val = e.target.value; setSortBy(val); sortResults(searchResults, val); };
+  
   const filteredResults = useMemo(() => {
       return searchResults.filter(emp => {
           if (resultFilter.designation.length > 0 && !resultFilter.designation.includes(emp.designation)) return false;
@@ -560,11 +600,11 @@ const App = () => {
                     <div style={styles.sectionTitle}> <span className="material-icons">filter_list</span> Filter Candidates </div>
                     <div style={styles.filterGrid}>
                         <div style={{ gridColumn: '1 / -1' }}>
-                            <label style={styles.label}>SKILLS (REQUIRED)</label>
-                            <MultiSelect options={uniqueSkills} selected={filters.skills} onChange={(val) => setFilters({...filters, skills: val})} placeholder="Select Skills to Match" />
+                            <label style={styles.label}>SKILLS (MULTI-SELECT)</label>
+                            <MultiSelect options={uniqueSkills} selected={filters.skills} onChange={(val) => setFilters({...filters, skills: val})} placeholder="Select skills to match..." />
                         </div>
                         <div>
-                            <label style={styles.label}>YEARS OF EXPERIENCE</label>
+                            <label style={styles.label}>TOTAL EXPERIENCE</label>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <input type="number" placeholder="Min" min="0" style={styles.input} value={filters.minExperience} onChange={(e) => setFilters({...filters, minExperience: e.target.value === '' ? '' : Math.max(0, Number(e.target.value))})} />
                                 <span style={{ color: '#888' }}>-</span>
@@ -572,20 +612,20 @@ const App = () => {
                             </div>
                         </div>
                         <div>
-                            <label style={styles.label}>LOCATION</label>
+                            <label style={styles.label}>REGION/LOCATION</label>
                             <select style={styles.select} value={filters.location} onChange={(e) => setFilters({...filters, location: e.target.value})}>
                                 <option value="">Any Location</option>
                                 {uniqueLocations.map(l => <option key={l} value={l}>{l}</option>)}
                             </select>
                         </div>
                         <div>
-                            <label style={styles.label}>EXPECTED START DATE</label>
+                            <label style={styles.label}>ESTIMATED START DATE</label>
                             <input type="date" style={styles.input} min={new Date().toISOString().split('T')[0]} value={filters.projectStartDate} onChange={(e) => setFilters({...filters, projectStartDate: e.target.value})} />
                         </div>
                     </div>
                     <div style={styles.actionRow}>
                         <button style={styles.textButtonDark} onClick={handleClearAll}> <span className="material-icons" style={{ fontSize: '18px' }}>close</span> Clear Filters </button>
-                        <button style={styles.buttonPrimary} onClick={() => handleSearch()}> <span className="material-icons">search</span> Search Candidates </button>
+                        <button style={styles.buttonPrimary} onClick={() => handleSearch()}> <span className="material-icons">search</span> Find Matches </button>
                     </div>
                 </div>
             </div>
@@ -593,13 +633,23 @@ const App = () => {
                 <div style={styles.aiSection}>
                     <div style={styles.aiHeader}>
                         <div style={styles.aiIconBox}> <span className="material-icons" style={{ fontSize: '24px' }}>auto_awesome</span> </div>
-                        <div> <div style={{ fontWeight: 'bold', fontSize: '18px' }}>AI Assistant</div> <div style={{ fontSize: '12px', opacity: 0.8 }}>Natural Language Search</div> </div>
+                        <div> <div style={{ fontWeight: 'bold', fontSize: '18px' }}>AI Match Assistant</div> <div style={{ fontSize: '12px', opacity: 0.8 }}>Prompt-based searching</div> </div>
                     </div>
-                    <textarea style={styles.aiTextArea} placeholder="e.g., Show me senior java developers" value={aiQuery} onChange={(e) => setAiQuery(e.target.value)} />
+                    <textarea 
+                        style={styles.aiTextArea} 
+                        placeholder="e.g., Show me senior java developers with SQL experience in India" 
+                        value={aiQuery} 
+                        onChange={(e) => setAiQuery(e.target.value)} 
+                    />
                     <div style={styles.aiFooter}>
-                        <button style={styles.textButtonLight} onClick={handleClearAll}> <span className="material-icons" style={{ fontSize: '16px' }}>backspace</span> Clear Input </button>
-                        <button style={{ ...styles.buttonPrimary, padding: '10px 16px', minWidth: '130px', fontSize: '14px' }} onClick={handleAIQuery} disabled={isAiLoading}>
-                            <span className="material-icons" style={{ fontSize: '18px' }}>search</span> {isAiLoading ? 'Thinking...' : 'Find Talent'}
+                        <button style={styles.textButtonLight} onClick={() => setAiQuery('')}> <span className="material-icons" style={{ fontSize: '16px' }}>backspace</span> Clear </button>
+                        <button 
+                            style={{ ...styles.buttonPrimary, padding: '10px 16px', minWidth: '130px', opacity: isAiLoading ? 0.7 : 1 }} 
+                            onClick={handleAIQuery} 
+                            disabled={isAiLoading}
+                        >
+                            <span className="material-icons" style={{ fontSize: '18px' }}>{isAiLoading ? 'hourglass_empty' : 'bolt'}</span> 
+                            {isAiLoading ? 'Thinking...' : 'Analyze Talent'}
                         </button>
                     </div>
                 </div>
@@ -609,39 +659,31 @@ const App = () => {
         {hasSearched && (
              <div style={styles.content}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                     <h3 style={{ margin: 0, color: '#0D0359' }}>Match Results ({filteredResults.length} Found)</h3>
+                     <h3 style={{ margin: 0, color: '#0D0359' }}>Match Results ({filteredResults.length})</h3>
                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                         <div style={{ fontSize: '12px', color: '#666', background: '#e0e0e0', padding: '4px 8px', borderRadius: '4px' }}> Source: {sourceFile} </div>
                          <select style={styles.select} value={sortBy} onChange={handleSortChange}>
                              <option value="match">Sort by: Best Match</option>
-                             <option value="designation">Sort by: Designation (A-Z)</option>
-                             <option value="exp_low">Sort by: Experience (Low to High)</option>
-                             <option value="exp_high">Sort by: Experience (High to Low)</option>
+                             <option value="designation">Sort by: Designation</option>
+                             <option value="exp_low">Sort by: Exp (Low-High)</option>
+                             <option value="exp_high">Sort by: Exp (High-Low)</option>
                          </select>
                      </div>
                 </div>
 
                 <div style={styles.refineBar}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '12px' }}> <span className="material-icons" style={{ color: '#0FE4BD' }}>tune</span> <span style={styles.refineLabel}>Refine Results:</span> </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '12px' }}> <span className="material-icons" style={{ color: '#0FE4BD' }}>tune</span> <span style={styles.refineLabel}>Refine:</span> </div>
                     <div style={{...styles.refineItem, minWidth: '200px'}}>
                         <span style={styles.refineLabel}>Designation</span>
-                        <MultiSelect options={resDesignations} selected={resultFilter.designation} onChange={(val) => setResultFilter({...resultFilter, designation: val})} placeholder="All Designations" />
+                        <MultiSelect options={resDesignations} selected={resultFilter.designation} onChange={(val) => setResultFilter({...resultFilter, designation: val})} placeholder="All" />
                     </div>
                     <div style={styles.refineItem}>
-                        <span style={styles.refineLabel}>Location</span>
+                        <span style={styles.refineLabel}>City/Loc</span>
                         <select style={styles.refineSelect} value={resultFilter.location} onChange={(e) => setResultFilter({...resultFilter, location: e.target.value})}>
-                            <option value="">All</option>
+                            <option value="">All Locations</option>
                             {resLocations.map(l => <option key={l} value={l}>{l}</option>)}
                         </select>
                     </div>
-                    <div style={styles.refineItem}>
-                        <span style={styles.refineLabel}>Exp Range</span>
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                            <input type="number" placeholder="Min" style={styles.refineInput} value={resultFilter.minExp} onChange={(e) => setResultFilter({...resultFilter, minExp: e.target.value === '' ? '' : Number(e.target.value)})} />
-                            <input type="number" placeholder="Max" style={styles.refineInput} value={resultFilter.maxExp} onChange={(e) => setResultFilter({...resultFilter, maxExp: e.target.value === '' ? '' : Number(e.target.value)})} />
-                        </div>
-                    </div>
-                    <button style={{ ...styles.textButtonDark, fontSize: '12px', marginLeft: 'auto' }} onClick={() => setResultFilter({ designation: [], location: '', minExp: '', maxExp: '' })}> Reset </button>
+                    <button style={{ ...styles.textButtonDark, fontSize: '12px', marginLeft: 'auto' }} onClick={() => setResultFilter({ designation: [], location: '', minExp: '', maxExp: '' })}> Reset View </button>
                 </div>
 
                 {filteredResults.map(emp => (
@@ -654,20 +696,20 @@ const App = () => {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '16px' }}>
                             <div> <div style={styles.cardLabel}><span className="material-icons" style={styles.cardIcon}>history</span>EXP</div> <div style={{ fontSize: '16px', fontWeight: '600' }}>{emp.totalExperience.toFixed(1)} Yrs</div> </div>
                             <div> <div style={styles.cardLabel}><span className="material-icons" style={styles.cardIcon}>place</span>LOC</div> <div style={{ fontSize: '16px', fontWeight: '600' }}>{emp.location}</div> </div>
-                            <div> <div style={styles.cardLabel}><span className="material-icons" style={styles.cardIcon}>event_available</span>AVAIL</div> <div style={{ fontSize: '16px', fontWeight: '600', color: '#0D0359' }}> {emp.availableFrom || 'Immediate'} </div> </div>
-                            <div> <div style={styles.cardLabel}><span className="material-icons" style={styles.cardIcon}>supervisor_account</span>WFM</div> <div style={{ fontSize: '16px', fontWeight: '600' }}> {emp.wfmManager || 'N/A'} </div> </div>
+                            <div> <div style={styles.cardLabel}><span className="material-icons" style={styles.cardIcon}>event_available</span>STATUS</div> <div style={{ fontSize: '16px', fontWeight: '600', color: '#0D0359' }}> {emp.availableFrom || 'Immediate'} </div> </div>
+                            <div> <div style={styles.cardLabel}><span className="material-icons" style={styles.cardIcon}>account_circle</span>WFM</div> <div style={{ fontSize: '16px', fontWeight: '600' }}> {emp.wfmManager || 'Unassigned'} </div> </div>
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
                             <div>
-                                <div style={styles.cardLabel}>PRIMARY SKILLS</div>
+                                <div style={styles.cardLabel}>PRIMARY</div>
                                 <div> {emp.primarySkill.map((s, i) => <span key={i} style={{ ...styles.tag, ...styles.tagPrimary }}>{s}</span>)} </div>
                             </div>
                             <div>
-                                <div style={styles.cardLabel}>SECONDARY SKILLS</div>
+                                <div style={styles.cardLabel}>SECONDARY</div>
                                 <div> {emp.secondarySkill.map((s, i) => <span key={i} style={styles.tag}>{s}</span>)} </div>
                             </div>
                             <div>
-                                <div style={styles.cardLabel}>ADDITIONAL SKILLS</div>
+                                <div style={styles.cardLabel}>ADDITIONAL</div>
                                 <div> {emp.additionalSkill.map((s, i) => <span key={i} style={styles.tag}>{s}</span>)} </div>
                             </div>
                         </div>
@@ -676,7 +718,7 @@ const App = () => {
                 
                 {filteredResults.length === 0 && (
                     <div style={{ textAlign: 'center', padding: '40px', backgroundColor: 'white', borderRadius: '8px', color: '#666' }}> 
-                        No candidates found matching the selected skills. Note: Skills are required for results to appear. 
+                        No candidates found matching the active filters.
                     </div>
                 )}
              </div>
